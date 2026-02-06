@@ -1,0 +1,17 @@
+# Traefik Static Configuration
+[global]
+  checkNewVersion = true
+  sendAnonymousUsage = false
+
+[api]
+  dashboard = true
+  insecure = true
+
+[log]
+  level = "INFO"
+
+[accessLog]
+
+[providers.docker]
+  exposedByDefault = false
+  network = "aitoolbox-network"
