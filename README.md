@@ -22,6 +22,11 @@ To run GPU-dependent services (flux-api, worker, gpu-check), enable the gpu prof
 docker compose --profile gpu up --build
 ```
 
+Open the app:
+
+- Web: http://localhost
+- Admin: http://localhost/admin
+
 ## Services
 
 - `web`: Next.js app with Payload CMS exposed via Traefik
@@ -45,6 +50,18 @@ ${FLUX_MODEL_DIR} -> /models/flux:ro
 
 Set `FLUX_MODEL_DIR` in your `.env` to a host path that already contains FLUX model weights.
 The containers run in offline mode and do not call Hugging Face.
+
+## Ollama model pull
+
+The `ollama-init` service pulls the `bggpt9` model on first run. If you want to pull it later:
+
+```bash
+docker compose exec ollama ollama pull bggpt9
+```
+
+## Postgres data directory
+
+Postgres uses `./data/postgres/data` as the data directory to avoid init errors from dotfiles.
 
 ## Traefik routing
 
