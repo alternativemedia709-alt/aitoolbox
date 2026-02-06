@@ -1,0 +1,161 @@
+version: '3.8'
+
+services:
+  # Traefik Reverse Proxy
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infrastructure/traefik/config:/etc/traefik
+    networks:
+      - aitoolbox-network
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/postgres:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - aitoolbox-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+      - ./infrastructure/redis:/usr/local/etc/redis
+    ports:
+      - "6379:6379"
+    networks:
+      - aitoolbox-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Next.js + Payload Web App
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: web
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - DATABASE_URL=${DATABASE_URL}
+      - PAYLOAD_SECRET=${PAYLOAD_SECRET}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - aitoolbox-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=Host(`localhost`)"
+      - "traefik.http.services.web.loadbalancer.server.port=3000"
+
+  # Flux API Service
+  flux-api:
+    build:
+      context: ./services/flux-api
+      dockerfile: Dockerfile
+    container_name: flux-api
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+    volumes:
+      - ./services/flux-api:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - aitoolbox-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.flux-api.rule=Host(`localhost`) && PathPrefix(`/api/flux`)"
+      - "traefik.http.services.flux-api.loadbalancer.server.port=8000"
+
+  # Social API Service
+  social-api:
+    build:
+      context: ./services/social-api
+      dockerfile: Dockerfile
+    container_name: social-api
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+    volumes:
+      - ./services/social-api:/app
+    ports:
+      - "8001:8001"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - aitoolbox-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.social-api.rule=Host(`localhost`) && PathPrefix(`/api/social`)"
+      - "traefik.http.services.social-api.loadbalancer.server.port=8001"
+
+  # Background Worker
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: worker
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - FLUX_API_URL=${FLUX_API_URL}
+      - SOCIAL_API_URL=${SOCIAL_API_URL}
+    volumes:
+      - ./worker:/app
+    depends_on:
+      - postgres
+      - redis
+      - flux-api
+      - social-api
+    networks:
+      - aitoolbox-network
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  aitoolbox-network:
+    driver: bridge
